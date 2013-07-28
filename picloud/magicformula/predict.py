@@ -177,7 +177,7 @@ def setup_pipeline():
                     max_parallel_jobs=10, _env='MagicFormula', _type='s1')
 
     ticker.attach(get_keystats, output_queues=[keystats],
-                  readers_per_job=5, max_parallel_jobs=10,
+                  readers_per_job=5, max_parallel_jobs=20,
                   _env='MagicFormula', _type='s1')
 
     return Pipeline(industry, ticker, keystats)
