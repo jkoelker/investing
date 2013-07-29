@@ -52,7 +52,7 @@ Pipeline = collections.namedtuple('Pipeline',
 
 def publish_to_twitter(df, prefix='MF', **kwargs):
     api = twitter.Api(**kwargs)
-    msg = ' '.join(['$%s' % s for s in df.keys()])
+    msg = ' '.join(['$%s' % s for s in df.index])
     msg = '%s: %s' % (prefix, msg)
     return api.PostUpdate(msg)
 
