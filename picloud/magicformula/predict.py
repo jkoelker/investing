@@ -50,10 +50,16 @@ Pipeline = collections.namedtuple('Pipeline',
                                  ('industry', 'ticker', 'keystats'))
 
 
-def publish_to_twitter(df, prefix='MF', **kwargs):
-    api = twitter.Api(**kwargs)
+def publish_to_twitter(df, prefix='MF', api=None, **kwargs):
+    if api is None:
+        api = twitter.Api(**kwargs)
+
     msg = ' '.join(['$%s' % s for s in df.index])
     msg = '%s: %s' % (prefix, msg)
+
+    if len(msg) > 140:
+        return publish_to_twitter(df[:-1], prefix, api, **kwargs)
+
     return api.PostUpdate(msg)
 
 
