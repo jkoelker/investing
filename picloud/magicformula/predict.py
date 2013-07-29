@@ -54,7 +54,7 @@ def publish_to_twitter(df, prefix='MF', api=None, **kwargs):
     if api is None:
         api = twitter.Api(**kwargs)
 
-    msg = ' '.join(['$%s' % s for s in df.index])
+    msg = ' '.join(['$%s' % s for s in df.T.index])
     msg = '%s: %s' % (prefix, msg)
 
     if len(msg) > 140:
@@ -105,7 +105,7 @@ def get_tickers_for_industry(industry_id):
     try:
         r = requests.get(INDUSTRY_URL % {'id': industry_id},
                          timeout=HTTP_TIMEOUT)
-    except requests.exceptions.Timeout:
+    except Exception:
         return []
 
     tree = etree.HTML(r.text)
@@ -130,7 +130,7 @@ def get_keystats(ticker):
     try:
         r = requests.get(KEYSTATS_URL % {'ticker': ticker},
                          timeout=HTTP_TIMEOUT)
-    except requests.exceptions.Timeout:
+    except Exception:
         return
 
     tree = etree.HTML(r.text)
