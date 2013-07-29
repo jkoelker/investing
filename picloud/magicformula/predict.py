@@ -4,7 +4,6 @@ import argparse
 import collections
 import itertools
 import sys
-import time
 
 import cloud
 import numpy as np
@@ -15,6 +14,7 @@ import twitter
 from lxml import etree
 
 
+HTTP_TIMEOUT = 10
 SECTOR_URL = 'http://biz.yahoo.com/p/sum_conameu.html'
 INDUSTRY_URL = 'http://biz.yahoo.com/p/%(id)sconameu.html'
 KEYSTATS_URL = 'http://finance.yahoo.com/q/ks?s=%(ticker)s'
@@ -62,6 +62,18 @@ def pairwise(iterable):
     return itertools.izip_longest(fillvalue=None, *args)
 
 
+def chunk_list(lst, chunk_size):
+    """split a lst into multiple lists of length chunk_size"""
+    return [lst[i:i+chunk_size] for i in range(0, len(lst), chunk_size)]
+
+
+def chunk_wrapper(func):
+    """Return a function that processes ``func`` over a list of elements"""
+    def wrapper_inner(chunked_args):
+        return map(func, chunked_args)
+    return wrapper_inner
+
+
 def get_industry_ids(exclude=None, include=None):
     r = requests.get(SECTOR_URL)
     tree = etree.HTML(r.text)
@@ -77,14 +89,19 @@ def get_industry_ids(exclude=None, include=None):
         if include is not None and sector not in include:
             continue
 
-        industry_id = link.get('href').strip('conameu.html')
+        industry_id = int(link.get('href').strip('conameu.html'))
         ids.append(industry_id)
 
     return ids
 
 
 def get_tickers_for_industry(industry_id):
-    r = requests.get(INDUSTRY_URL % {'id': industry_id})
+    try:
+        r = requests.get(INDUSTRY_URL % {'id': industry_id},
+                         timeout=HTTP_TIMEOUT)
+    except requests.exceptions.Timeout:
+        return []
+
     tree = etree.HTML(r.text)
     tickers = []
 
@@ -104,7 +121,12 @@ def get_tickers_for_industry(industry_id):
 
 
 def get_keystats(ticker):
-    r = requests.get(KEYSTATS_URL % {'ticker': ticker})
+    try:
+        r = requests.get(KEYSTATS_URL % {'ticker': ticker},
+                         timeout=HTTP_TIMEOUT)
+    except requests.exceptions.Timeout:
+        return
+
     tree = etree.HTML(r.text)
     keystats = {}
 
@@ -167,45 +189,6 @@ def get_keystats(ticker):
     return (ticker, keystats)
 
 
-def setup_pipeline():
-    industry = cloud.queue.get('industry')
-    ticker = cloud.queue.get('ticker')
-    keystats = cloud.queue.get('keystats')
-
-    industry.attach(get_tickers_for_industry, output_queues=[ticker],
-                    iter_output=True, readers_per_job=5,
-                    max_parallel_jobs=20, _env='MagicFormula', _type='s1')
-
-    ticker.attach(get_keystats, output_queues=[keystats],
-                  readers_per_job=5, max_parallel_jobs=40,
-                  _env='MagicFormula', _type='s1')
-
-    return Pipeline(industry, ticker, keystats)
-
-
-def collect_pipeline(pipeline, output, prime_time=15):
-    # NOTE(jkoelker) Give the queues some time to fill up
-    time.sleep(prime_time)
-
-    items = []
-    keys = set()
-
-    def collect_values():
-        for k, v in output.pop():
-            if k in keys:
-                continue
-            keys.add(k)
-            items.append((k, v))
-
-    while sum(q.count() for q in pipeline):
-        collect_values()
-
-    while output.count():
-        collect_values()
-
-    return pd.DataFrame.from_items(items)
-
-
 def rank_stocks(df, min_market_cap=30000000):
     roa_key = 'Return on Assets (ttm)'
     pe_key = 'Trailing P/E'
@@ -222,10 +205,33 @@ def rank_stocks(df, min_market_cap=30000000):
     return df.sort_index(by=[pe_rank, roa_rank], ascending=[1, 1])
 
 
-def get_stocks():
-    queues = setup_pipeline()
-    queues.industry.push(get_industry_ids(exclude=EXCLUDED_INDUSTRIES))
-    return collect_pipeline(queues, queues.keystats)
+def get_stocks(chunk_size=75):
+    iter_chain = itertools.chain.from_iterable
+    industry_ids = get_industry_ids(exclude=EXCLUDED_INDUSTRIES)
+    jids = cloud.map(chunk_wrapper(get_tickers_for_industry),
+                     chunk_list(industry_ids, chunk_size),
+                     _env='MagicFormula', _type='s1', _label='Get Tickers',
+                     _max_runtime=10)
+
+    # NOTE(jkoelker) Somtimes scraping is iffy, so rather than block, we
+    #                set the _max_runtime to two mins and allow errors in
+    #                results, filtering them as they come in
+    # NOTE(jkoelker) get_tickers_for_industry returns a list so we have to
+    #                double unchunk it
+    results = cloud.result(jids, ignore_errors=True)
+    ticker_chunks = iter_chain(results)
+    tickers = [t for t in iter_chain(ticker_chunks)
+               if t or not isinstance(t, cloud.CloudException)]
+
+    jids = cloud.map(chunk_wrapper(get_keystats),
+                     chunk_list(tickers, chunk_size),
+                     _env='MagicFormula', _type='s1', _label='Get Keystats',
+                     _max_runtime=10)
+
+    results = cloud.result(jids, ignore_errors=True)
+    values = [v for v in iter_chain(results)
+              if v or not isinstance(v, cloud.CloudException)]
+    return pd.DataFrame(dict(values))
 
 
 def predict(num_stocks, **twitter):
