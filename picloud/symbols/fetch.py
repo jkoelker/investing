@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 
 import argparse
+import datetime
 import itertools
 import sys
 
 import cloud
 import MySQLdb
+import parsedatetime as pdt
 import requests
 
 from lxml import etree
@@ -73,6 +75,9 @@ KEY_MAP = {'Forward P/E': 'fw_pe',
            'Qtrly Revenue Growth (yoy)': 'qtrly_revenue_growth_yoy',
            '3 month Avg Vol': '3m_avg_vol'}
 
+DATE_MAP = ['div_date', 'ex_div_date', 'fsc_year_end', 'last_split_date',
+            'mrq']
+
 
 class DatabaseHandler(object):
     def __init__(self, host, user, password, database, table,
@@ -121,42 +126,53 @@ class TickerHandler(DatabaseHandler):
 
 class KeystatsHandler(DatabaseHandler):
     def message_handler(self, ticker):
-        stats = get_keystats(ticker['ticker'])
-        values = dict((KEY_MAP[k], v)
-                      for k, v in stats.iteritems()
+        values = dict((KEY_MAP[k],
+                       v if KEY_MAP[k] not in DATE_MAP else get_date(v))
+                      for k, v in ticker['keystats'].iteritems()
                       if KEY_MAP.get(k))
 
-        fields = ('10d_avg_vol', '200d_mavg', '3m_avg_vol', '5y_avg_div_yld',
-                  '50d_mavg', '52w_change', '52w_high', '52w_low', 'beta',
-                  'bk_val_per_share_mrq', 'cur_ratio_mrq', 'dil_eps_ttm',
-                  'div_date', 'ebita_ttm', 'ent_val', 'ent_val_ebita_ttm',
-                  'ent_val_rev_ttm', 'ex_div_date', 'fsc_year_end', 'float',
+        fields = ('10d_avg_vol', '200d_mavg', '3m_avg_vol',
+                  '5y_avg_div_yld', '50d_mavg', '52w_change',
+                  '52w_high', '52w_low', 'beta', 'bk_val_per_share_mrq',
+                  'cur_ratio_mrq', 'dil_eps_ttm', 'div_date', 'ebita_ttm',
+                  'ent_val', 'ent_val_ebita_ttm', 'ent_val_rev_ttm',
+                  'ex_div_date', 'fsc_year_end', 'float',
                   'fw_ann_div_rate', 'fw_ann_div_yld', 'fw_pe',
-                  'gross_profit_ttm', 'last_split_date', 'last_split_factor',
-                  'levered_free_cash_flow_ttm', 'market_cap', 'mrq',
-                  'net_inc_avl_to_com_ttm', 'op_cash_flow_ttm',
-                  'op_margin_ttm', 'peg_ratio', 'payout_ratio',
-                  'insider_percent', 'inst_percent', 'price_per_book_mrq',
-                  'price_per_sales_ttm', 'prior_m_shares_short',
-                  'profit_margin_ttm', 'qtrly_earnings_growth_yoy',
-                  'qtrly_revenue_growth_yoy', 'roa_ttm', 'roe_ttm',
-                  'revenue_ttm', 'revenue_per_share_ttm', 'sp_52w_change',
+                  'gross_profit_ttm', 'last_split_date',
+                  'last_split_factor', 'levered_free_cash_flow_ttm',
+                  'market_cap', 'mrq', 'net_inc_avl_to_com_ttm',
+                  'op_cash_flow_ttm', 'op_margin_ttm', 'peg_ratio',
+                  'payout_ratio', 'insider_percent', 'inst_percent',
+                  'price_per_book_mrq', 'price_per_sales_ttm',
+                  'prior_m_shares_short', 'profit_margin_ttm',
+                  'qtrly_earnings_growth_yoy', 'qtrly_revenue_growth_yoy',
+                  'roa_ttm', 'roe_ttm', 'revenue_ttm',
+                  'revenue_per_share_ttm', 'sp_52w_change',
                   'shares_out', 'shares_short', 'short_percent_of_float',
-                  'short_ratio', 'cash_mrq', 'cash_per_share_mrq', 'debt_mrq',
-                  'debt_to_equity_mrq', 'trailing_annual_div_yield',
-                  'trailing_pe')
+                  'short_ratio', 'cash_mrq', 'cash_per_share_mrq',
+                  'debt_mrq', 'debt_to_equity_mrq',
+                  'trailing_annual_div_yield', 'trailing_pe')
 
+        fields_str = ', '.join(['`%s`' % f for f in fields])
         cursor = self.db.cursor()
         qry = ' '.join(['INSERT INTO %s' % self.table,
-                        '(ticker_id, %s)' % ', '.join(fields),
-                        'SELECT', 't.id,',
+                        '(`ticker_id`, %s)' % fields_str,
+                        '\nSELECT', 'tickers.id,',
                         ', '.join(['%%(%s)s' % f for f in fields]),
-                        'FROM tickers WHERE ticker = %s' % ticker['ticker']])
+                        'FROM tickers WHERE',
+                        'ticker = "%s"' % ticker['ticker']])
 
         cursor.execute(qry, values)
         self.db.commit()
         cursor.close()
         DatabaseHandler.message_handler(self, ticker)
+
+
+def get_date(s):
+    if not isinstance(s, basestring):
+        return s
+    time_tpl = pdt.Calendar().parse(s)[0][:7]
+    return datetime.datetime(*time_tpl)
 
 
 def pairwise(iterable):
@@ -199,8 +215,8 @@ def get_tickers_for_industry(industry_id):
         tickers.append({'sector': sector, 'industry': industry,
                         'ticker': ticker})
 
-    # NOTE(jkoelker) If no tickers are found return None so it won't be pushed
-    #                into a queue
+    # NOTE(jkoelker) If no tickers are found return None so it won't be
+    #                pushed into a queue
     if not tickers:
         return
 
@@ -208,11 +224,7 @@ def get_tickers_for_industry(industry_id):
 
 
 def get_keystats(ticker):
-    try:
-        r = requests.get(KEYSTATS_URL % {'ticker': ticker},
-                         timeout=HTTP_TIMEOUT)
-    except Exception:
-        return
+    r = requests.get(KEYSTATS_URL % ticker)
 
     tree = etree.HTML(r.text)
     keystats = {}
@@ -262,18 +274,25 @@ def get_keystats(ticker):
             value = value.replace('%', '').replace(',', '')
             value = float(value) / 100.00
 
-        elif value.lower() == 'n/a':
+        elif value.lower() in ('n/a', 'nan'):
             value = None
 
         else:
             try:
                 value = float(value)
             except:
-                pass
+                value = value.replace(',', '')
 
         keystats[name] = value
 
-    return keystats
+    # NOTE(jkoelker) If no keystats are found return None so it won't be
+    #                pushed into a queue
+    if not keystats:
+        return
+
+    ticker['keystats'] = keystats
+
+    return ticker
 
 
 def main():
@@ -290,28 +309,32 @@ def main():
                         help='MySQL password')
     parser.add_argument('database',
                         help='Database to store tickers in')
-    parser.add_argument('table',
-                        help='Table to store tickers in')
     parser.add_argument('--help',
                         action='help', default=argparse.SUPPRESS,
                         help='show this help message and exit')
     args = parser.parse_args()
-    db_args = (args.host, args.user, args.password, args.database, args.table)
+    db_args = (args.host, args.user, args.password, args.database)
 
     input_q = cloud.queue.get('tickers-input')
     ticker_q = cloud.queue.get('tickers-tickers')
+    fetch_q = cloud.queue.get('tickers-fetch-keystats')
     keystats_q = cloud.queue.get('tickers-keystats')
 
     input_q.attach(get_tickers_for_industry, output_queues=[ticker_q],
                    readers_per_job=2, max_parallel_jobs=10,
                    _env='MagicFormula', _type='s1')
 
-    ticker_q.attach(TickerHandler(*db_args, output_queues=[keystats_q]),
-                    readers_per_job=1, max_parallel_jobs=1)
+    ticker_q.attach(TickerHandler(*db_args, table='tickers',
+                                  output_queues=[fetch_q]),
+                    readers_per_job=2, max_parallel_jobs=2)
 
-    keystats_q.attach(KeystatsHandler(*db_args),
-                      readers_per_job=2, max_parallel_jobs=20,
-                      _env='MagicFormula', _type='s1')
+    fetch_q.attach(get_keystats, output_queues=[keystats_q],
+                   readers_per_job=2, max_parallel_jobs=20,
+                   _env='MagicFormula', _type='s1')
+
+    keystats_q.attach(KeystatsHandler(*db_args, table='fundamentals'),
+                      readers_per_job=2, max_parallel_jobs=2,
+                      _env='MagicFormula', )
 
     input_q.push(get_industry_ids())
 
