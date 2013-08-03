@@ -95,7 +95,7 @@ def main():
     db_kwargs = {'host': args.host,
                  'user': args.user,
                  'passwd': args.password,
-                 'database': args.database}
+                 'db': args.database}
 
     twitter_kwargs = {'consumer_key': args.consumer_key,
                       'consumer_secret': args.consumer_secret,
