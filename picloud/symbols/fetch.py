@@ -321,7 +321,7 @@ def main():
     keystats_q = cloud.queue.get('tickers-keystats')
 
     input_q.attach(get_tickers_for_industry, output_queues=[ticker_q],
-                   readers_per_job=2, max_parallel_jobs=10,
+                   readers_per_job=1, max_parallel_jobs=15,
                    _env='investing', _type='s1')
 
     ticker_q.attach(TickerHandler(*db_args, table='tickers',
@@ -329,7 +329,7 @@ def main():
                     readers_per_job=2, max_parallel_jobs=2)
 
     fetch_q.attach(get_keystats, output_queues=[keystats_q],
-                   readers_per_job=2, max_parallel_jobs=20,
+                   readers_per_job=1, max_parallel_jobs=50,
                    _env='investing', _type='s1')
 
     keystats_q.attach(KeystatsHandler(*db_args, table='fundamentals'),
