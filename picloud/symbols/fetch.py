@@ -4,6 +4,7 @@ import argparse
 import datetime
 import itertools
 import sys
+import time
 
 import cloud
 import MySQLdb
@@ -189,6 +190,7 @@ def get_industry_ids():
 
 
 def get_tickers_for_industry(industry_id):
+    time.sleep(2)
     r = requests.get(INDUSTRY_URL % {'id': industry_id})
     tree = etree.HTML(r.text)
     tickers = []
@@ -224,6 +226,7 @@ def get_tickers_for_industry(industry_id):
 
 
 def get_keystats(ticker):
+    time.sleep(2)
     r = requests.get(KEYSTATS_URL % ticker)
 
     tree = etree.HTML(r.text)
