@@ -52,7 +52,7 @@ def get_stocks(db_kwargs):
 
 def predict(num_stocks, db_kwargs, twitter_kwargs):
     stocks = get_stocks(db_kwargs)
-    rank = rank_stocks(stocks.T)
+    rank = rank_stocks(stocks)
     return publish_to_twitter(rank[:num_stocks].T, **twitter_kwargs)
 
 
