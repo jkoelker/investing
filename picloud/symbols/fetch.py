@@ -322,7 +322,7 @@ def main():
 
     input_q.attach(get_tickers_for_industry, output_queues=[ticker_q],
                    readers_per_job=2, max_parallel_jobs=10,
-                   _env='MagicFormula', _type='s1')
+                   _env='investing', _type='s1')
 
     ticker_q.attach(TickerHandler(*db_args, table='tickers',
                                   output_queues=[fetch_q]),
@@ -330,11 +330,11 @@ def main():
 
     fetch_q.attach(get_keystats, output_queues=[keystats_q],
                    readers_per_job=2, max_parallel_jobs=20,
-                   _env='MagicFormula', _type='s1')
+                   _env='investing', _type='s1')
 
     keystats_q.attach(KeystatsHandler(*db_args, table='fundamentals'),
                       readers_per_job=2, max_parallel_jobs=2,
-                      _env='MagicFormula', )
+                      _env='investing', )
 
     input_q.push(get_industry_ids())
 
