@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 
 import argparse
+import collections
 import datetime
 import itertools
+import random
 import sys
-import time
 
 import cloud
 import MySQLdb
@@ -14,7 +15,12 @@ import requests
 from lxml import etree
 
 
-HTTP_TIMEOUT = 10
+MIN_DELAY = 20
+MAX_DELAY = 120
+MAX_RETRIES = 3
+MIN_RETRY_DELAY = MIN_DELAY * 2
+MAX_RETRY_DELAY = min(900, MAX_DELAY * 2)
+
 SECTOR_URL = 'http://biz.yahoo.com/p/sum_conameu.html'
 INDUSTRY_URL = 'http://biz.yahoo.com/p/%(id)sconameu.html'
 KEYSTATS_URL = 'http://finance.yahoo.com/q/ks?s=%(ticker)s'
@@ -102,7 +108,10 @@ class DatabaseHandler(object):
 
     def message_handler(self, msg):
         for output_queue in self.output_queues:
-            output_queue.push(msg)
+            if not isinstance(msg, collections.Iterable):
+                msg = [msg]
+            output_queue.push(msg, delay=random.randint(MIN_DELAY,
+                                                        MAX_DELAY))
 
     def post_handling(self):
         self.db.close()
@@ -190,7 +199,6 @@ def get_industry_ids():
 
 
 def get_tickers_for_industry(industry_id):
-    time.sleep(2)
     r = requests.get(INDUSTRY_URL % {'id': industry_id})
     tree = etree.HTML(r.text)
     tickers = []
@@ -226,7 +234,6 @@ def get_tickers_for_industry(industry_id):
 
 
 def get_keystats(ticker):
-    time.sleep(2)
     r = requests.get(KEYSTATS_URL % ticker)
 
     tree = etree.HTML(r.text)
@@ -325,6 +332,10 @@ def main():
 
     input_q.attach(get_tickers_for_industry, output_queues=[ticker_q],
                    readers_per_job=1, max_parallel_jobs=8,
+                   retry_on=[requests.RequestException],
+                   retry_delay=random.randint(MIN_RETRY_DELAY,
+                                              MAX_RETRY_DELAY),
+                   max_retries=MAX_RETRIES,
                    _env='investing', _type='s1')
 
     ticker_q.attach(TickerHandler(*db_args, table='tickers',
@@ -333,13 +344,19 @@ def main():
 
     fetch_q.attach(get_keystats, output_queues=[keystats_q],
                    readers_per_job=1, max_parallel_jobs=15,
+                   retry_on=[requests.RequestException],
+                   retry_delay=random.randint(MIN_RETRY_DELAY,
+                                              MAX_RETRY_DELAY),
+                   max_retries=MAX_RETRIES,
                    _env='investing', _type='s1')
 
     keystats_q.attach(KeystatsHandler(*db_args, table='fundamentals'),
                       readers_per_job=2, max_parallel_jobs=1,
                       _env='investing', )
 
-    input_q.push(get_industry_ids())
+    for industry_id in get_industry_ids():
+        input_q.push([industry_id], delay=random.randint(MIN_DELAY,
+                                                         MAX_DELAY))
 
     return 0
 
