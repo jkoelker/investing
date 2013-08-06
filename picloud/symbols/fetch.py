@@ -120,13 +120,28 @@ class DatabaseHandler(object):
 class TickerHandler(DatabaseHandler):
     def message_handler(self, tickers):
         cursor = self.db.cursor()
+        fields = ('1d_price_change', 'market_cap', 'trailing_pe', 'roe_ttm',
+                  'trailing_annual_div_yield', 'debt_to_equity_mrq',
+                  'price_per_book_mrq')
+
+        fields_str = ', '.join(['sector_%s' % f for f in fields] +
+                               ['industry_%s' % f for f in fields])
+        fields_inst_str = ', '.join(['%%(%s)s' % ('sector_%s' % f)
+                                     for f in fields] +
+                                    ['%%(%s)s' % ('industry_%s' % f)
+                                     for f in fields])
         qry = ' '.join(['INSERT INTO %s' % self.table,
-                        '(ticker, sector, industry)',
-                        'VALUES (%(ticker)s, %(sector)s, %(industry)s)',
+                        '(ticker, sector, industry, %s)' % fields_str,
+                        'VALUES (%(ticker)s, %(sector)s, %(industry)s,',
+                        '%s)' % fields_inst_str,
                         'ON DUPLICATE KEY UPDATE',
                         'last_seen = NOW(),',
                         'sector = %(sector)s,',
-                        'industry = %(industry)s'])
+                        'industry = %(industry)s,',
+                        ', '.join(['%s = %%(%s)s' % (('sector_%s' % f,) * 2)
+                                   for f in fields]) + ',',
+                        ', '.join(['%s = %%(%s)s' % (('industry_%s' % f,) * 2)
+                                   for f in fields])])
 
         cursor.executemany(qry, tickers)
         self.db.commit()
@@ -190,6 +205,31 @@ def pairwise(iterable):
     return itertools.izip_longest(fillvalue=None, *args)
 
 
+def numify(value):
+    if value[-1] in ('B', 'b'):
+        value = int(float(value[:-1].replace(',', '')) * 1000000000)
+
+    elif value[-1] in ('M', 'm'):
+        value = int(float(value[:-1].replace(',', '')) * 1000000)
+
+    elif value[-1] in ('K', 'k'):
+        value = int(float(value[:-1].replace(',', '')) * 1000)
+
+    elif '%' in value:
+        value = value.replace('%', '').replace(',', '')
+        value = float(value) / 100.00
+
+    elif value.lower() in ('n/a', 'nan'):
+        value = None
+
+    else:
+        try:
+            value = float(value)
+        except:
+            value = value.replace(',', '')
+    return value
+
+
 def get_industry_ids():
     r = requests.get(SECTOR_URL)
     tree = etree.HTML(r.text)
@@ -202,16 +242,31 @@ def get_tickers_for_industry(industry_id):
     r = requests.get(INDUSTRY_URL % {'id': industry_id})
     tree = etree.HTML(r.text)
     tickers = []
+    fields = ('1d_price_change', 'market_cap', 'trailing_pe', 'roe_ttm',
+              'trailing_annual_div_yield', 'debt_to_equity_mrq',
+              'price_per_book_mrq')
+
+    def get_stats(prefix, td):
+        ret = {}
+        for i, cell in enumerate(td.getparent().xpath('.//td')[1:-2]):
+            key = '%s_%s' % (prefix, fields[i])
+            ret[key] = numify(cell.xpath('.//font')[0].text)
+
+        return ret
 
     xpath = '//table[@width=\"100%\"]//td[@bgcolor=\"ffffee\"]'
     cells = tree.xpath(xpath)
 
     sector_td, industry_td = cells[:2]
+
     sector = sector_td.xpath('.//a')[0].text
     industry = industry_td.xpath('.//font')[1].text
 
     industry = industry.replace('\n', ' ')
     industry = industry.strip().strip('(').strip()
+
+    sector_data = get_stats('sector', sector_td)
+    industry_data = get_stats('industry', industry_td)
 
     for td in cells[2:]:
         links = td.xpath('.//a')
@@ -222,8 +277,14 @@ def get_tickers_for_industry(industry_id):
         if '.' in ticker:
             continue
 
-        tickers.append({'sector': sector, 'industry': industry,
-                        'ticker': ticker})
+        data = {'sector': sector,
+                'sector_data': sector_data,
+                'industry': industry,
+                'industry_data': industry_data,
+                'ticker': ticker}
+        data.update(sector_data)
+        data.update(industry_data)
+        tickers.append(data)
 
     # NOTE(jkoelker) If no tickers are found return None so it won't be
     #                pushed into a queue
@@ -270,28 +331,7 @@ def get_keystats(ticker):
 
         name = str(name.strip())
         value = value.text.strip()
-
-        if value[-1] in ('B', 'b'):
-            value = int(float(value[:-1].replace(',', '')) * 1000000000)
-
-        elif value[-1] in ('M', 'm'):
-            value = int(float(value[:-1].replace(',', '')) * 1000000)
-
-        elif value[-1] in ('K', 'k'):
-            value = int(float(value[:-1].replace(',', '')) * 1000)
-
-        elif '%' in value:
-            value = value.replace('%', '').replace(',', '')
-            value = float(value) / 100.00
-
-        elif value.lower() in ('n/a', 'nan'):
-            value = None
-
-        else:
-            try:
-                value = float(value)
-            except:
-                value = value.replace(',', '')
+        value = numify(value)
 
         keystats[name] = value
 
