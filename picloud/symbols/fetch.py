@@ -374,7 +374,7 @@ def main():
     keystats_q = cloud.queue.get('tickers-keystats')
 
     input_q.attach(get_tickers_for_industry, output_queues=[ticker_q],
-                   readers_per_job=1, max_parallel_jobs=8,
+                   readers_per_job=2, max_parallel_jobs=4,
                    retry_on=[requests.RequestException],
                    retry_delay=random.randint(MIN_RETRY_DELAY,
                                               MAX_RETRY_DELAY),
@@ -386,7 +386,7 @@ def main():
                     readers_per_job=2, max_parallel_jobs=1)
 
     fetch_q.attach(get_keystats, output_queues=[keystats_q],
-                   readers_per_job=1, max_parallel_jobs=15,
+                   readers_per_job=2, max_parallel_jobs=10,
                    retry_on=[requests.RequestException],
                    retry_delay=random.randint(MIN_RETRY_DELAY,
                                               MAX_RETRY_DELAY),
