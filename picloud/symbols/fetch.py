@@ -206,6 +206,9 @@ def pairwise(iterable):
 
 
 def numify(value):
+    if not value:
+        return
+
     if value[-1] in ('B', 'b'):
         value = int(float(value[:-1].replace(',', '')) * 1000000000)
 
@@ -219,7 +222,7 @@ def numify(value):
         value = value.replace('%', '').replace(',', '')
         value = float(value) / 100.00
 
-    elif value.lower() in ('n/a', 'nan'):
+    elif value.lower() in ('n/a', 'nan', 'na'):
         value = None
 
     else:
