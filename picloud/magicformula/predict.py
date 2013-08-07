@@ -39,6 +39,12 @@ def get_stocks(db_kwargs):
     WHERE f.ticker_id = t.id
     AND t.last_seen BETWEEN DATE_SUB(NOW(), INTERVAL 1 WEEK) AND NOW()
     AND t.sector NOT IN ('Financial', 'Utilities')
+    AND t.industry NOT IN ('Independent Oil & Gas',
+                           'Major Integrated Oil & Gas',
+                           'Oil & Gas Drilling & Exploration'
+                           'Oil & Gas Equipment & Services',
+                           'Oil & Gas Pipelines',
+                           'Oil & Gas Refining & Marketing')
     AND f.roa_ttm >= 0.25
     AND f.trailing_pe >= 5
     AND f.market_cap >= 30000000
