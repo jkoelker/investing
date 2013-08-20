@@ -37,7 +37,7 @@ def get_stocks(db_kwargs):
     SELECT t.ticker, f.*, MAX(f.refresh_dt)
     FROM fundamentals f, tickers t
     WHERE f.ticker_id = t.id
-    AND t.last_seen BETWEEN DATE_SUB(NOW(), INTERVAL 1 WEEK) AND NOW()
+    AND f.refresh_dt BETWEEN DATE_SUB(NOW(), INTERVAL 1 WEEK) AND NOW()
     AND t.sector NOT IN ('Financial', 'Utilities')
     AND t.industry NOT IN ('Independent Oil & Gas',
                            'Major Integrated Oil & Gas',
